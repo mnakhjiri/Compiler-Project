@@ -118,3 +118,37 @@ llvm::SmallVector<Statement *> completeUnroll(ForStatement &forStatement)
     }
     return unrolledStatements;
 }
+
+
+llvm::SmallVector<Statement *> incompleteUnroll(ForStatement &forStatement, int k)
+{
+    llvm::SmallVector<Statement *> unrolledStatements;
+    llvm::SmallVector<Statement *> body = forStatement.getStatements();
+
+    // Get for variables and constants
+    int initialIterator = forStatement.getInitialAssign()->getRValue()->getNumber();
+    BooleanOp *condition_boolean_op = (BooleanOp *) forStatement.getCondition();
+    int conditionValue = condition_boolean_op->getRight()->getNumber();
+    int updateValue = ((BinaryOp *) forStatement.getUpdateAssign()->getRValue())->getRight()->getNumber();
+    
+    
+    bool remain = true;
+
+    if((conditionValue % (updateValue*k)) == 0){
+        remain = false;
+    }
+    // Simulate the for in the program. Iterate on body and push back new statements with updated indices
+    
+    for (Statement *statement : body)
+    {
+        for (int i = initialIterator; i < k; i += 1)
+        {
+            Statement *newStatement = updateStatement(statement, forStatement.getInitialAssign()->getLValue()->getValue(), i);
+            unrolledStatements.push_back(newStatement);
+        }
+    }
+
+
+    //assign_up remains
+    return new ForStatement(condition_boolean_op,unrolledStatements,forStatement.getInitialAssign(),);
+}
