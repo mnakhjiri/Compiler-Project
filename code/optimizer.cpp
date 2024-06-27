@@ -149,6 +149,6 @@ llvm::SmallVector<Statement *> incompleteUnroll(ForStatement &forStatement, int 
     }
 
 
-    //assign_up remains
+    //assign_up needs to complete
     return new ForStatement(condition_boolean_op,unrolledStatements,forStatement.getInitialAssign(),);
 }
