@@ -1,13 +1,12 @@
-#ifndef SEMA_H
-#define SEMA_H
+#ifndef SEMANTIC_H
+#define SEMANTIC_H
 
 #include "AST.h"
-#include "lexer.h"
 
-class Semantic
-{
+class Semantic {
 public:
-    bool semantic(AST *Tree);
+
+    bool semantic(ProgramNode *root);
 };
 
-#endif
+#endif 

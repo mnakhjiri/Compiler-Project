@@ -1,509 +1,281 @@
 #ifndef AST_H
 #define AST_H
 
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/InitLLVM.h"
-#include "llvm/Support/raw_ostream.h"
+#include <memory>
+#include <vector>
+#include <string>
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Support/raw_ostream.h>
 
-
-class AST;                      // Abstract Syntax Tree
-class Base;                     // top level program
-class PrintStatement;
-class BinaryOp;                 // binary operation of numbers and identifiers
-class Statement;                // top level statement
-class BooleanOp;                // boolean operation like 3 > 6*2;
-class Expression;               // top level expression that is evaluated to boolean, int or variable name at last
-class IfStatement;
-class DecStatement;             // declaration statement like int a;
-class ElseIfStatement;
-class ElseStatement;
-class AssignStatement;          // assignment statement like a = 3;
-class ForStatement;
-class WhileStatement;
-// class afterCheckStatement;
-
-
-class ASTVisitor
-{
-public:
-	// Virtual visit functions for each AST node type
-	virtual void visit(AST&) {}
-	virtual void visit(Expression&) {}
-	virtual void visit(Base&) = 0;
-	virtual void visit(Statement&) = 0;
-	virtual void visit(BinaryOp&) = 0;
-	virtual void visit(DecStatement&) = 0;
-	virtual void visit(AssignStatement&) = 0;
-	virtual void visit(BooleanOp&) = 0;
-	virtual void visit(IfStatement&) = 0;
-	virtual void visit(ElseIfStatement&) = 0;
-	virtual void visit(ElseStatement&) = 0;
-    virtual void visit(PrintStatement&) = 0;
-	virtual void visit(ForStatement&) = 0;
-	virtual void visit(WhileStatement&) = 0;
+enum class VarType { 
+    INT, BOOL, FLOAT, CHAR, 
+    STRING, ARRAY, ERROR, NEUTRAL 
 };
 
-class AST {
-public:
-	virtual ~AST() {}
-	virtual void accept(ASTVisitor& V) = 0;
+enum class BinaryOp { 
+    ADD, SUBTRACT, MULTIPLY, DIVIDE, MOD,
+    EQUAL, NOT_EQUAL, LESS, LESS_EQUAL, GREATER, GREATER_EQUAL,
+    AND, OR, INDEX, CONCAT, POW, 
+    ARRAY_ADD, ARRAY_SUBTRACT, ARRAY_MULTIPLY, ARRAY_DIVIDE 
 };
 
-class TopLevelEntity : AST {
-public:
-	TopLevelEntity() {}
+enum class UnaryOp { 
+    INCREMENT, DECREMENT, 
+    LENGTH, MIN, MAX, ABS 
 };
 
+enum class LoopType { FOR, FOREACH, WHILE };
 
-class Expression : public TopLevelEntity {
-public:
-	enum ExpressionType {
-		Number,
-		Identifier,
-		Boolean,
-		BinaryOpType,
-		BooleanOpType
-	};
-private:
-	ExpressionType Type;
-	llvm::StringRef Value;
-	int NumberVal;
-	bool BoolVal;
-	BooleanOp* BOVal;
-
-public:
-	Expression() {}
-	Expression(llvm::StringRef value) : Type(ExpressionType::Identifier), Value(value) {} // store string
-	Expression(int value) : Type(ExpressionType::Number), NumberVal(value) {} // store number
-	Expression(bool value) : Type(ExpressionType::Boolean), BoolVal(value) {} // store boolean
-	Expression(BooleanOp* value) : Type(ExpressionType::BooleanOpType), BOVal(value) {} // store boolean
-	Expression(ExpressionType type) : Type(type) {}
-
-	bool isNumber() {
-		if (Type == ExpressionType::Number)
-			return true;
-		return false;
-	}
-
-	bool isBoolean() {
-		if (Type == ExpressionType::Boolean)
-			return true;
-		return false;
-	}
-
-	bool isVariable() {
-		if (Type == ExpressionType::Identifier)
-			return true;
-		return false;
-	}
-
-	bool isBinaryOp() {
-		if (Type == ExpressionType::BinaryOpType)
-			return true;
-		return false;
-	}
-
-	bool isBooleanOp() {
-		if (Type == ExpressionType::BooleanOpType)
-			return true;
-		return false;
-	}
-
-	llvm::StringRef getValue() {
-		return Value;
-	}
-
-	int getNumber() {
-		return NumberVal;
-	}
-
-	BooleanOp* getBooleanOp() {
-		return BOVal;
-	}
-
-	bool getBoolean() {
-		return BoolVal;
-	}
-	ExpressionType getKind()
-	{
-		return Type;
-	}
-
-	virtual void accept(ASTVisitor& V) override
-	{
-		V.visit(*this);
-	}
+enum class StmtType { 
+    IF, ELSE_IF, ELSE, 
+    FOR, WHILE, TRY_CATCH, 
+    VAR_DECL, ASSIGN, PRINT, 
+    BLOCK, MATCH 
 };
 
-class BooleanOp : public Expression
-{
+class ASTNode {
 public:
-	enum Operator
-	{
-		LessEqual,
-		Less,
-		Greater,
-		GreaterEqual,
-		Equal,
-		NotEqual,
-		And,
-		Or
-	};
-
-private:
-	Expression* Left;                               
-	Expression* Right;                              
-	Operator Op;
-
-public:
-	BooleanOp(Operator Op, Expression* L, Expression* R) : Op(Op), Left(L), Right(R), Expression(ExpressionType::BooleanOpType) { }
-
-	Expression* getLeft() { return Left; }
-
-	Expression* getRight() { return Right; }
-
-	Operator getOperator() { return Op; }
-
-	virtual void accept(ASTVisitor& V) override
-	{
-		V.visit(*this);
-	}
+    virtual ~ASTNode() = default;
+    virtual void print(llvm::raw_ostream &os, int indent = 0) const = 0;
 };
 
-
-class BinaryOp : public Expression
-{
+// barname  - majmoo e ii az gozaare ha
+class ProgramNode : public ASTNode {
 public:
-	enum Operator
-	{
-		Plus,
-		Minus,
-		Mul,
-		Div,
-		Mod,
-		Pow
-	};
-
-private:
-	Expression* Left;                               // Left-hand side expression
-	Expression* Right;                              // Right-hand side expression
-	Operator Op;                              // Operator of the binary operation
-
-public:
-	BinaryOp(Operator Op, Expression* L, Expression* R) : Op(Op), Left(L), Right(R), Expression(ExpressionType::BinaryOpType) {}
-
-	Expression* getLeft() { return Left; }
-
-	Expression* getRight() { return Right; }
-
-	Operator getOperator() { return Op; }
-
-	virtual void accept(ASTVisitor& V) override
-	{
-		V.visit(*this);
-	}
+    std::vector<std::unique_ptr<ASTNode>> statements;
+    
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
 };
 
-
-class Base : public AST
-{
-private:
-    llvm::SmallVector<Statement *> statements;
-
+// Var decleration
+class VarDeclNode : public ASTNode {
 public:
-    Base(llvm::SmallVector<Statement *> Statements) : statements(Statements) {}
-    llvm::SmallVector<Statement *> getStatements() { return statements; }
+    VarType type;
+    std::string name;
+    std::unique_ptr<ASTNode> value;
+    
+    VarDeclNode(VarType t, std::string n, std::unique_ptr<ASTNode> v)
+        : type(t), name(n), value(std::move(v)) {}
+        
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
+};
 
-    llvm::SmallVector<Statement *>::const_iterator begin() { return statements.begin(); }
+// tarif chand moteghayyer
+class MultiVarDeclNode : public ASTNode {
+public:
+    std::vector<std::unique_ptr<VarDeclNode>> declarations;
+    
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
+};
 
-    llvm::SmallVector<Statement *>::const_iterator end() { return statements.end(); }
-    virtual void accept(ASTVisitor &V) override
-    {
-        V.visit(*this);
+// Assignment
+class AssignNode : public ASTNode {
+public:
+    std::string target;
+    BinaryOp op;
+    std::unique_ptr<ASTNode> value;
+    
+    AssignNode(std::string t, BinaryOp o, std::unique_ptr<ASTNode> v)
+        : target(t), op(o), value(std::move(v)) {}
+        
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
+};
+
+// Refrence to Variable
+class VarRefNode : public ASTNode {
+public:
+    std::string name;
+    
+    VarRefNode(std::string n) : name(n) {}
+    
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
+};
+
+// Literals
+template<typename T>
+class LiteralNode : public ASTNode {
+public:
+    T value;
+    
+    LiteralNode(T val) : value(val) {}
+    
+    void print(llvm::raw_ostream &os, int indent = 0) const override {
+        os << value;
     }
 };
 
-// stores information of a statement. For example x=56; is a statement
-class Statement : public TopLevelEntity
-{
+using IntLiteral = LiteralNode<int>;
+using FloatLiteral = LiteralNode<float>;
+using BoolLiteral = LiteralNode<bool>;
+using CharLiteral = LiteralNode<char>;
+using StrLiteral = LiteralNode<std::string>;
+
+// Binaray
+class BinaryOpNode : public ASTNode {
 public:
-    enum StatementType
-    {
-        If,
-        ElseIf,
-        Else,
-        Print,
-        Declaration,
-        Assignment,
-		While,
-		For
-    };
-
-private:
-    StatementType Type;
-
-public:
-    StatementType getKind()
-    {
-        return Type;
-    }
-
-    Statement(StatementType type) : Type(type) {}
-    virtual void accept(ASTVisitor &V) override
-    {
-        V.visit(*this);
-    }
+    BinaryOp op;
+    std::unique_ptr<ASTNode> left;
+    std::unique_ptr<ASTNode> right;
+    
+    BinaryOpNode(BinaryOp o, std::unique_ptr<ASTNode> l, std::unique_ptr<ASTNode> r)
+        : op(o), left(std::move(l)), right(std::move(r)) {}
+        
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
 };
 
-class PrintStatement : public Statement
-{
-    private:
-    Expression * expr;
-    public:
-    // contructor that sets type
-    PrintStatement(Expression * identifier) : expr(identifier), Statement(Statement::StatementType::Print) {}
-    Expression * getExpr()
-    {
-        return expr;
-    }
-    virtual void accept(ASTVisitor &V) override
-    {
-        V.visit(*this);
-    }
+// Unary
+class UnaryOpNode : public ASTNode {
+public:
+    UnaryOp op;
+    std::unique_ptr<ASTNode> operand;
+    
+    UnaryOpNode(UnaryOp o, std::unique_ptr<ASTNode> opnd)
+        : op(o), operand(std::move(opnd)) {}
+        
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
 };
 
-
-class DecStatement : public Statement {
+// Code Block
+class BlockNode : public ASTNode {
 public:
-	enum DecStatementType {
-		Number,
-		Boolean,
-	};
-private:
-
-	Expression* lvalue;
-	Expression* rvalue;
-	Statement::StatementType type;
-	DecStatement::DecStatementType dec_type;
-
-public:
-	DecStatement(Expression* lvalue, Expression* rvalue) : lvalue(lvalue), rvalue(rvalue), type(Statement::StatementType::Declaration), Statement(type) { }
-	DecStatement(Expression* lvalue) : lvalue(lvalue), rvalue(rvalue), type(Statement::StatementType::Declaration), Statement(type) { rvalue = new Expression(0); }
-	DecStatement(Expression* lvalue, Expression* rvalue, DecStatement::DecStatementType dec_type) : lvalue(lvalue), rvalue(rvalue), type(Statement::StatementType::Declaration), dec_type(dec_type), Statement(type) { }
-
-	Expression* getLValue() {
-		return lvalue;
-	}
-
-	Expression* getRValue() {
-		return rvalue;
-	}
-
-	DecStatementType getDecType() {
-		return dec_type;
-	}
-
-	virtual void accept(ASTVisitor& V) override
-	{
-		V.visit(*this);
-	}
+    std::vector<std::unique_ptr<ASTNode>> statements;
+    
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
 };
 
-
-class AssignStatement : public Statement {
-private:
-
-	Expression* lvalue;
-	Expression* rvalue;
-	Statement::StatementType type;
-
+// if/else
+class IfElseNode : public ASTNode {
 public:
-	AssignStatement(Expression* lvalue, Expression* rvalue) : lvalue(lvalue), rvalue(rvalue), type(Statement::StatementType::Assignment), Statement(type) { }
-	Expression* getLValue() {
-		return lvalue;
-	}
-
-	Expression* getRValue() {
-		return rvalue;
-	}
-
-	virtual void accept(ASTVisitor& V) override
-	{
-		V.visit(*this);
-	}
+    std::unique_ptr<ASTNode> condition;
+    std::unique_ptr<BlockNode> thenBlock;
+    std::unique_ptr<ASTNode> elseBlock; // Can be BlockNode or IfElseNode
+    
+    IfElseNode(std::unique_ptr<ASTNode> cond, 
+              std::unique_ptr<BlockNode> thenBlk,
+              std::unique_ptr<ASTNode> elseBlk = nullptr)
+        : condition(std::move(cond)), 
+          thenBlock(std::move(thenBlk)),
+          elseBlock(std::move(elseBlk)) {}
+          
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
 };
 
-class IfStatement : public Statement
-{
-
-private:
-    Expression *condition;
-    llvm::SmallVector<Statement *> statements;
-    llvm::SmallVector<ElseIfStatement *> elseIfStatements;
-    ElseStatement *elseStatement;
-    bool hasElseIf;
-    bool hasElse;
-
+// for
+class ForLoopNode : public ASTNode {
 public:
-    IfStatement(Expression *condition,
-                llvm::SmallVector<Statement *> statements,
-                llvm::SmallVector<ElseIfStatement *> elseIfStatements,
-                ElseStatement *elseStatement,
-                bool hasElseIf,
-                bool hasElse,
-                StatementType type) : condition(condition),
-                                      statements(statements),
-                                      elseIfStatements(elseIfStatements),
-                                      elseStatement(elseStatement),
-                                      hasElseIf(hasElseIf),
-                                      hasElse(hasElse),
-                                      Statement(type) {}
-
-    Expression *getCondition()
-    {
-        return condition;
-    }
-
-    bool HasElseIf()
-    {
-        return hasElseIf;
-    }
-
-    bool HasElse()
-    {
-        return hasElse;
-    }
-
-    llvm::SmallVector<ElseIfStatement *> getElseIfStatements()
-    {
-        return elseIfStatements;
-    }
-
-    llvm::SmallVector<Statement *> getStatements()
-    {
-        return statements;
-    }
-
-    ElseStatement *getElseStatement()
-    {
-        return elseStatement;
-    }
-
-    virtual void accept(ASTVisitor &V) override
-    {
-        V.visit(*this);
-    }
+    std::unique_ptr<ASTNode> init;
+    std::unique_ptr<ASTNode> condition;
+    std::unique_ptr<ASTNode> update;
+    std::unique_ptr<BlockNode> body;
+    
+    ForLoopNode(std::unique_ptr<ASTNode> i, 
+               std::unique_ptr<ASTNode> cond,
+               std::unique_ptr<ASTNode> upd,
+               std::unique_ptr<BlockNode> b)
+        : init(std::move(i)), condition(std::move(cond)),
+          update(std::move(upd)), body(std::move(b)) {}
+          
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
 };
 
-class ElseIfStatement : public Statement
-{
-
-private:
-    Expression *condition;
-    llvm::SmallVector<Statement *> statements;
-
+// foreach
+class ForeachLoopNode : public ASTNode {
 public:
-    ElseIfStatement(Expression *condition, llvm::SmallVector<Statement *> statements, StatementType type) : condition(condition), statements(statements), Statement(type) {}
-
-    Expression *getCondition()
-    {
-        return condition;
-    }
-
-    llvm::SmallVector<Statement *> getStatements()
-    {
-        return statements;
-    }
-
-    virtual void accept(ASTVisitor &V) override
-    {
-        V.visit(*this);
-    }
+    std::string varName;
+    std::unique_ptr<ASTNode> collection;
+    std::unique_ptr<BlockNode> body;
+    
+    ForeachLoopNode(std::string var, 
+                   std::unique_ptr<ASTNode> coll,
+                   std::unique_ptr<BlockNode> b)
+        : varName(var), collection(std::move(coll)), body(std::move(b)) {}
+        
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
 };
 
-class ElseStatement : public Statement
-{
-
-private:
-    llvm::SmallVector<Statement *> statements;
-
+// print
+class PrintNode : public ASTNode {
 public:
-    ElseStatement(llvm::SmallVector<Statement *> statements, Statement::StatementType type) : statements(statements), Statement(type) {}
-
-    llvm::SmallVector<Statement *> getStatements()
-    {
-        return statements;
-    }
-
-    virtual void accept(ASTVisitor &V) override
-    {
-        V.visit(*this);
-    }
+    std::unique_ptr<ASTNode> expr;
+    
+    PrintNode(std::unique_ptr<ASTNode> e) : expr(std::move(e)) {}
+    
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
 };
 
-class WhileStatement : public Statement {
-
-private:
-	Expression* condition;
-	llvm::SmallVector<Statement*> statements;
-	bool optimized;
-
+// araye
+class ArrayNode : public ASTNode {
 public:
-	WhileStatement(Expression* condition, llvm::SmallVector<Statement*> statements, StatementType type) : condition(condition), statements(statements), Statement(type) {}
-	WhileStatement(Expression* condition, llvm::SmallVector<Statement*> statements, StatementType type, bool optimized) : condition(condition), statements(statements), Statement(type), optimized(optimized) { }
-	Expression* getCondition()
-	{
-		return condition;
-	}
-
-	llvm::SmallVector<Statement*> getStatements()
-	{
-		return statements;
-	}
-
-	virtual void accept(ASTVisitor& V) override
-	{
-		V.visit(*this);
-	}
-
-	bool isOptimized(){
-		return optimized;
-	}
+    std::vector<std::unique_ptr<ASTNode>> elements;
+    
+    ArrayNode(std::vector<std::unique_ptr<ASTNode>> elems)
+        : elements(std::move(elems)) {}
+        
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
 };
 
-class ForStatement : public Statement {
-
-private:
-	Expression* condition;
-	llvm::SmallVector<Statement*> statements;
-	AssignStatement *initial_assign;
-	AssignStatement *update_assign;
-	bool optimized;
+// nth khoone Arraye  
+class ArrayAccessNode : public ASTNode {
 public:
-	ForStatement(Expression* condition,llvm::SmallVector<Statement*> statements,AssignStatement *initial_assign,AssignStatement *update_assign, Statement type ) : condition(condition), statements(statements),initial_assign(initial_assign),update_assign(update_assign) , Statement(type){}
-	ForStatement(Expression* condition,llvm::SmallVector<Statement*> statements,AssignStatement *initial_assign,AssignStatement *update_assign, Statement type, bool optimized) : condition(condition), statements(statements),initial_assign(initial_assign),update_assign(update_assign) , Statement(type), optimized(optimized){}
-	Expression* getCondition()
-	{
-		return condition;
-	}
-
-	llvm::SmallVector<Statement*> getStatements()
-	{
-		return statements;
-	}
-	bool isOptimized(){
-		return optimized;
-	}
-	AssignStatement* getInitialAssign(){
-		return initial_assign;
-	}
-	AssignStatement* getUpdateAssign(){
-		return update_assign;
-	}
-	virtual void accept(ASTVisitor& V) override
-	{
-		V.visit(*this);
-	}
-
+    std::string arrayName;
+    std::unique_ptr<ASTNode> index;
+    
+    ArrayAccessNode(std::string name, std::unique_ptr<ASTNode> idx)
+        : arrayName(name), index(std::move(idx)) {}
+        
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
 };
+
+// Concat
+class ConcatNode : public ASTNode {
+public:
+    std::unique_ptr<ASTNode> left;
+    std::unique_ptr<ASTNode> right;
+    
+    ConcatNode(std::unique_ptr<ASTNode> l, std::unique_ptr<ASTNode> r)
+        : left(std::move(l)), right(std::move(r)) {}
+        
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
+};
+
+class PowNode : public ASTNode {
+public:
+    std::unique_ptr<ASTNode> base;
+    std::unique_ptr<ASTNode> exponent;
+    
+    PowNode(std::unique_ptr<ASTNode> b, std::unique_ptr<ASTNode> e)
+        : base(std::move(b)), exponent(std::move(e)) {}
+        
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
+};
+
+// Error Control
+class TryCatchNode : public ASTNode {
+public:
+    std::unique_ptr<BlockNode> tryBlock;
+    std::unique_ptr<BlockNode> catchBlock;
+    std::string errorVar;
+    
+    TryCatchNode(std::unique_ptr<BlockNode> tryBlk,
+                std::unique_ptr<BlockNode> catchBlk,
+                std::string errVar)
+        : tryBlock(std::move(tryBlk)), 
+          catchBlock(std::move(catchBlk)),
+          errorVar(errVar) {}
+          
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
+};
+
+// match pattern
+class MatchNode : public ASTNode {
+public:
+    std::unique_ptr<ASTNode> expr;
+    std::vector<std::unique_ptr<ASTNode>> cases;
+    
+    MatchNode(std::unique_ptr<ASTNode> e, std::vector<std::unique_ptr<ASTNode>> c)
+        : expr(std::move(e)), cases(std::move(c)) {}
+        
+    void print(llvm::raw_ostream &os, int indent = 0) const override;
+};
+
 #endif

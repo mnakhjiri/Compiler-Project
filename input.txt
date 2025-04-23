@@ -4,3 +4,22 @@ for (i = 0; i <= 5; i++) {
   x = i + 2;
 }
 print(x);
+
+
+
+bool flag = true; 
+/* if (flag == true) {
+or
+ */
+/* if (flag) { */
+
+if (flag == false) {
+	print(x);
+} else if (flag) { 
+	print(x);
+} else { 
+	print(x);
+}
+
+float ff;
+float t=3;

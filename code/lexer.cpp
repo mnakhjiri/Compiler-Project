@@ -1,294 +1,194 @@
 #include "lexer.h"
-#include <string>
+#include <cctype>
 
-
-namespace charinfo
-{
-	LLVM_READNONE inline bool isWhitespace(char c)
-	{
-		return c == ' ' || c == '\t' || c == '\f' ||
-			   c == '\v' || c == '\r' || c == '\n';
-	}
-
-	LLVM_READNONE inline bool isDigit(char c)
-	{
-		return c >= '0' && c <= '9';
-	}
-
-	LLVM_READNONE inline bool isLetter(char c)
-	{
-		return (c >= 'a' && c <= 'z') ||
-			   (c >= 'A' && c <= 'Z');
-	}
-
-	LLVM_READNONE inline bool isOperator(char c)
-	{
-		return c == '+' || c == '-' || c == '*' ||
-			   c == '/' || c == '^' || c == '=' ||
-			   c == '%' || c == '<' || c == '>' ||
-			   c == '!';
-	}
-
-	LLVM_READNONE inline bool isSpecialCharacter(char c)
-	{
-		return c == ';' || c == ',' || c == '(' ||
-			   c == ')' || c == '{' || c == '}' ||  c == ',';
-	}
+Lexer::Lexer(llvm::StringRef buffer) {
+    bufferStart = buffer.begin();
+    bufferPtr = bufferStart;
 }
 
-void Lexer::next(Token &token)
-{
-	// Skips whitespace like " "
-	while (*BufferPtr && charinfo::isWhitespace(*BufferPtr))
-	{
-		++BufferPtr;
-	}
-	bool is_comment = false;
-	if (*BufferPtr == '/' && *(BufferPtr + 1) == '*'){
-		is_comment = true;
-	}
-	while(is_comment){
-		if (!*BufferPtr)
-		{
-			token.Kind = Token::eof;
-			return;
-		}
-		while (*BufferPtr && *BufferPtr != '*' && *(BufferPtr + 1) != '/')
-		{
-			++BufferPtr;
-		}
-		if(*BufferPtr == '*' && *(BufferPtr + 1) == '/'){
-			BufferPtr += 2;
-			is_comment = false;
-		}
-		else{
-			++BufferPtr;
-		}
-		while (*BufferPtr && charinfo::isWhitespace(*BufferPtr))
-		{
-			++BufferPtr;
-		}
-	}
-	// since end of context is 0 -> !0 = true -> end of context
-	if (!*BufferPtr)
-	{
-		token.Kind = Token::eof;
-		return;
-	}
-	// looking for keywords or identifiers like "int", a123 , ...
-	if (charinfo::isLetter(*BufferPtr))
-	{
-		const char *end = BufferPtr + 1;
-
-		// until reaches the end of lexeme
-		// example: ".int " -> "i.nt " -> "in.t " -> "int. "
-		while (charinfo::isLetter(*end) || charinfo::isDigit(*end) || *end == '_')
-		{
-			++end;
-		}
-
-		llvm::StringRef Context(BufferPtr, end - BufferPtr); // start of lexeme, length of lexeme
-		Token::TokenKind kind;
-		if (Context == "int")
-		{
-			kind = Token::KW_int;
-		}
-		else if (Context == "if")
-		{
-			kind = Token::KW_if;
-		}
-		else if (Context == "bool")
-		{
-			kind = Token::KW_bool;
-		}
-		else if (Context == "else")
-		{
-			kind = Token::KW_else;
-		}
-		else if (Context == "while")
-		{
-			kind = Token::KW_while;
-		}
-		else if (Context == "for")
-		{
-			kind = Token::KW_for;
-		}
-		else if (Context == "and")
-		{
-			kind = Token::KW_and;
-		}
-		else if (Context == "or")
-		{
-			kind = Token::KW_or;
-		}
-		else if (Context == "true")
-		{
-			kind = Token::KW_true;
-		}
-		else if (Context == "false")
-		{
-			kind = Token::KW_false;
-		}
-		else if (Context == "print")
-		{
-			kind = Token::KW_print;
-		}
-		else
-		{
-			kind = Token::identifier;
-		}
-
-		formToken(token, end, kind);
-		return;
-	}
-
-	else if (charinfo::isDigit(*BufferPtr))
-	{
-
-		const char *end = BufferPtr + 1;
-
-		while (charinfo::isDigit(*end))
-			++end;
-
-		formToken(token, end, Token::number);
-		return;
-	}
-	else if (charinfo::isSpecialCharacter(*BufferPtr))
-	{
-		switch (*BufferPtr)
-		{
-		case ';':
-			formToken(token, BufferPtr + 1, Token::semi_colon);
-			break;
-		case ',':
-			formToken(token, BufferPtr + 1, Token::comma);
-			break;
-		case '(':
-			formToken(token, BufferPtr + 1, Token::l_paren);
-			break;
-		case ')':
-			formToken(token, BufferPtr + 1, Token::r_paren);
-			break;
-		case '{':
-			formToken(token, BufferPtr + 1, Token::l_brace);
-			break;
-		case '}':
-			formToken(token, BufferPtr + 1, Token::r_brace);
-			break;
-		}
-	}
-	else
-	{
-
-		if (*BufferPtr == '=' && *(BufferPtr + 1) == '=')
-		{ // ==
-			formToken(token, BufferPtr + 2, Token::equal_equal);
-		}
-		else if (*BufferPtr == '+' && *(BufferPtr + 1) == '=')
-		{ // +=
-			formToken(token, BufferPtr + 2, Token::plus_equal);
-		}
-		else if (*BufferPtr == '-' && *(BufferPtr + 1) == '=')
-		{ // -=
-			formToken(token, BufferPtr + 2, Token::minus_equal);
-		}
-
-		else if (*BufferPtr == '*' && *(BufferPtr + 1) == '=')
-		{ // *=
-			formToken(token, BufferPtr + 2, Token::star_equal);
-		}
-
-		else if (*BufferPtr == '/' && *(BufferPtr + 1) == '=')
-		{ // /=
-			formToken(token, BufferPtr + 2, Token::slash_equal);
-		}
-
-		else if (*BufferPtr == '%' && *(BufferPtr + 1) == '=')
-		{ // %=
-			formToken(token, BufferPtr + 2, Token::mod_equal);
-		}
-
-		else if (*BufferPtr == '!' && *(BufferPtr + 1) == '=')
-		{ // !=
-			formToken(token, BufferPtr + 2, Token::not_equal);
-		}
-
-		else if (*BufferPtr == '<' && *(BufferPtr + 1) == '=')
-		{ // <=
-			formToken(token, BufferPtr + 2, Token::less_equal);
-		}
-
-		else if (*BufferPtr == '>' && *(BufferPtr + 1) == '=')
-		{
-			formToken(token, BufferPtr + 2, Token::greater_equal); // >=
-		}
-		else if (*BufferPtr == '/' && *(BufferPtr + 1) == '*')
-		{
-			formToken(token, BufferPtr + 2, Token::comment); // comment
-		}
-		else if (*BufferPtr == '*' && *(BufferPtr + 1) == '/')
-		{
-			formToken(token, BufferPtr + 2, Token::uncomment); // uncomment
-		}
-		else if (*BufferPtr == '+' && *(BufferPtr + 1) == '+')
-		{
-			formToken(token, BufferPtr + 2, Token::plus_plus); // ++
-		}
-		else if (*BufferPtr == '-' && *(BufferPtr + 1) == '-')
-		{
-			formToken(token, BufferPtr + 2, Token::minus_minus); // --
-		}
-		else if (*BufferPtr == '=')
-		{
-			formToken(token, BufferPtr + 1, Token::equal); // =
-		}
-		else if (*BufferPtr == '+')
-		{
-			formToken(token, BufferPtr + 1, Token::plus); // +
-		}
-		else if (*BufferPtr == '-')
-		{
-			formToken(token, BufferPtr + 1, Token::minus); // -
-		}
-		else if (*BufferPtr == '*')
-		{
-			formToken(token, BufferPtr + 1, Token::star); // *
-		}
-		else if (*BufferPtr == '/')
-		{
-			formToken(token, BufferPtr + 1, Token::slash); // /
-		}
-		else if (*BufferPtr == '^')
-		{
-			formToken(token, BufferPtr + 1, Token::power); // ^
-		}
-		else if (*BufferPtr == '>')
-		{
-			formToken(token, BufferPtr + 1, Token::greater); // >
-		}
-		else if (*BufferPtr == '<')
-		{
-			formToken(token, BufferPtr + 1, Token::less); // <
-		}
-		else if (*BufferPtr == '!')
-		{
-			formToken(token, BufferPtr + 1, Token::KW_not ); // !
-		}
-		else if (*BufferPtr == '%')
-		{
-			formToken(token, BufferPtr + 1, Token::mod); // %
-		}
-		else
-		{
-			formToken(token, BufferPtr + 1, Token::unknown);
-		}
-	}
-
+void Lexer::skipWhitespace() {
+    while (isspace(*bufferPtr)) {
+        if (*bufferPtr == '\n') bufferPtr++;
+        else bufferPtr++;
+    }
 }
 
-void Lexer::formToken(Token &Tok, const char *TokEnd, Token::TokenKind Kind)
-{
-	Tok.Kind = Kind;
-	Tok.Text = llvm::StringRef(BufferPtr, TokEnd - BufferPtr);
-	BufferPtr = TokEnd;
+void Lexer::skipComment() {
+    if (*bufferPtr == '/' && *(bufferPtr + 1) == '*') {
+        bufferPtr += 2;
+        while (!(*bufferPtr == '*' && *(bufferPtr + 1) == '/')) bufferPtr++;
+        bufferPtr += 2;
+    }
+}
+
+Token Lexer::nextToken() {
+    skipWhitespace();
+    skipComment();
+
+    if (bufferPtr >= bufferStart + buffer.size()) 
+        return {Token::eof, llvm::StringRef(), 0, 0};
+
+    const char *tokStart = bufferPtr;
+    
+    // KWords & Identifiers
+    if (isalpha(*bufferPtr)) {
+        while (isalnum(*bufferPtr) || *bufferPtr == '_') bufferPtr++;
+        llvm::StringRef text(tokStart, bufferPtr - tokStart);
+        
+        Token::TokenKind kind = Token::identifier;
+        if (text == "int") kind = Token::KW_int;
+        else if (text == "bool") kind = Token::KW_bool;
+        else if (text == "float") kind = Token::KW_float;
+        else if (text == "char") kind = Token::KW_char;
+        else if (text == "string") kind = Token::KW_string;
+        else if (text == "array") kind = Token::KW_array;
+        else if (text == "if") kind = Token::KW_if;
+        else if (text == "else") kind = Token::KW_else;
+        else if (text == "while") kind = Token::KW_while;
+        else if (text == "for") kind = Token::KW_for;
+        else if (text == "foreach") kind = Token::KW_foreach;
+        else if (text == "in") kind = Token::KW_in;
+        else if (text == "print") kind = Token::KW_print;
+        else if (text == "true") kind = Token::KW_true;
+        else if (text == "false") kind = Token::KW_false;
+        else if (text == "try") kind = Token::KW_try;
+        else if (text == "catch") kind = Token::KW_catch;
+        else if (text == "error") kind = Token::KW_error;
+        else if (text == "match") kind = Token::KW_match;
+        else if (text == "concat") kind = Token::KW_concat;
+        else if (text == "pow") kind = Token::KW_pow;
+        else if (text == "abs") kind = Token::KW_abs;
+        else if (text == "length") kind = Token::KW_length;
+        else if (text == "min") kind = Token::KW_min;
+        else if (text == "max") kind = Token::KW_max;
+        else if (text == "and")   kind = Token::and_op;
+        else if (text == "or")    kind = Token::or_op;
+        else if (text == "not")   kind = Token::not_op;
+        else if (text == "index") kind = Token::KW_index;
+        
+        return {kind, text, 0, 0};
+    }
+    
+    // numbers
+    if (isdigit(*bufferPtr) || *bufferPtr == '.') {
+        bool hasDot = false;
+    if (*bufferPtr == '.') {
+        hasDot = true;
+        bufferPtr++;
+    }
+    while (isdigit(*bufferPtr) || (!hasDot && *bufferPtr == '.')) {
+        if (*bufferPtr == '.') hasDot = true;
+        bufferPtr++;
+    }
+    return {hasDot ? Token::float_literal : Token::number, 
+            llvm::StringRef(tokStart, bufferPtr - tokStart), 0, 0};}
+
+    // strings
+    if (*bufferPtr == '"') {
+        bufferPtr++;
+        const char *start = bufferPtr;
+        while (*bufferPtr != '"' && *bufferPtr != '\0') bufferPtr++;
+        return {Token::string_literal, llvm::StringRef(start, bufferPtr - start), 0, 0};
+    }
+    
+    // charachters
+    if (*bufferPtr == '\'') {
+        bufferPtr++;
+        char c = *bufferPtr;
+        bufferPtr += 2; // Skip closing '
+        return {Token::char_literal, llvm::StringRef(&c, 1), 0, 0};
+    }
+    
+    // operators & symbols
+    switch (*bufferPtr) {
+        case ';': bufferPtr++; return {Token::semi_colon, ";", 0, 0};
+        case ',': bufferPtr++; return {Token::comma, ",", 0, 0};
+        case '(': bufferPtr++; return {Token::l_paren, "(", 0, 0};
+        case ')': bufferPtr++; return {Token::r_paren, ")", 0, 0};
+        case '{': bufferPtr++; return {Token::l_brace, "{", 0, 0};
+        case '}': bufferPtr++; return {Token::r_brace, "}", 0, 0};
+        case '[': bufferPtr++; return {Token::l_bracket, "[", 0, 0};
+        case ']': bufferPtr++; return {Token::r_bracket, "]", 0, 0};
+        case '+':
+            if (*(bufferPtr + 1) == '+') {
+                bufferPtr += 2;
+                return {Token::plus_plus, "++", 0, 0};
+            } else if (*(bufferPtr + 1) == '=') {
+                bufferPtr += 2;
+                return {Token::plus_equal, "+=", 0, 0};
+            }
+            bufferPtr++;
+            return {Token::plus, "+", 0, 0};
+        case '-':
+            if (*(bufferPtr + 1) == '-') {
+                bufferPtr += 2;
+                return {Token::minus_minus, "--", 0, 0};
+            } else if (*(bufferPtr + 1) == '=') {
+                bufferPtr += 2;
+                return {Token::minus_equal, "-=", 0, 0};
+            } else if (*(bufferPtr + 1) == '>') {
+                bufferPtr += 2;
+                return {Token::arrow, "->", 0, 0};
+            }
+            bufferPtr++;
+            return {Token::minus, "-", 0, 0};
+        case '*':
+            if (*(bufferPtr + 1) == '=') {
+                bufferPtr += 2;
+                return {Token::star_equal, "*=", 0, 0};
+            }
+            bufferPtr++;
+            return {Token::star, "*", 0, 0};
+        case '/':
+            if (*(bufferPtr + 1) == '=') {
+                bufferPtr += 2;
+                return {Token::slash_equal, "/=", 0, 0};
+            }
+            bufferPtr++;
+            return {Token::slash, "/", 0, 0};
+        case '%':
+            if (*(bufferPtr + 1) == '=') {
+                bufferPtr += 2;
+                return {Token::mod_equal, "%=", 0, 0};
+            }
+            bufferPtr++;
+            return {Token::mod, "%", 0, 0};
+        case '^':
+            bufferPtr++;
+            return {Token::caret, "^", 0, 0};
+        case '=':
+            if (*(bufferPtr + 1) == '=') {
+                bufferPtr += 2;
+                return {Token::equal_equal, "==", 0, 0};
+            }
+            bufferPtr++;
+            return {Token::equal, "=", 0, 0};
+        case '!':
+            if (*(bufferPtr + 1) == '=') {
+                bufferPtr += 2;
+                return {Token::not_equal, "!=", 0, 0};
+            } else {
+                bufferPtr++;
+                return {Token::not_op, "!", 0, 0};
+            }
+        case '<':
+            if (*(bufferPtr + 1) == '=') {
+                bufferPtr += 2;
+                return {Token::less_equal, "<=", 0, 0};
+            }
+            bufferPtr++;
+            return {Token::less, "<", 0, 0};
+        case '>':
+            if (*(bufferPtr + 1) == '=') {
+                bufferPtr += 2;
+                return {Token::greater_equal, ">=", 0, 0};
+            }
+            bufferPtr++;
+            return {Token::greater, ">", 0, 0};
+        case '_':
+            bufferPtr++;
+            return {Token::underscore, "_", 0, 0};
+    }
+    
+    return {Token::eof, llvm::StringRef(), 0, 0};
 }

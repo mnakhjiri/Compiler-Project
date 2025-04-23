@@ -56,7 +56,8 @@ int main(int argc, const char **argv)
 	Token nextToken;
 	Lexer lexer(contentRef);
 	Parser Parser(lexer);
-	AST *Tree = Parser.parse();
+	std::unique_ptr<ProgramNode> TreePtr = Parser.parseProgram();
+	ProgramNode *Tree = TreePtr.get();
 
 	Semantic semantic;
 	if (semantic.semantic(Tree))

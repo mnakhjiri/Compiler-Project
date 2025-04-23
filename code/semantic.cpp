@@ -1,312 +1,262 @@
 #include "semantic.h"
+#include "AST.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/raw_ostream.h"
 
-namespace
-{
-    class DeclCheck : public ASTVisitor
-    {
-        llvm::StringMap<char> variableTypeMap;
-        bool HasError;
 
-        enum ErrorType
-        {
-            AlreadyDefinedVariable,
-            NotDefinedVariable,
-            DivideByZero,
-            WrongValueTypeForVariable
-        };
+namespace {
+    static const char *varTypeName(VarType t) {
+        switch (t) {
+        case VarType::INT:    return "int";
+        case VarType::FLOAT:  return "float";
+        case VarType::BOOL:   return "bool";
+        case VarType::CHAR:   return "char";
+        case VarType::STRING: return "string";
+        case VarType::ARRAY:  return "array";
+        default:              return "<unknown>";
+        }
+    }
 
-        void error(ErrorType errorType, llvm::StringRef V)
-        {
-            switch (errorType)
-            {
-            case ErrorType::DivideByZero:
-                llvm::errs() << "Division by zero is not allowed!\n";
-                break;
-            case ErrorType::AlreadyDefinedVariable:
-                llvm::errs() << "Variable " << V << " is already declared!\n";
-                break;
-            case ErrorType::NotDefinedVariable:
-                llvm::errs() << "Variable " << V << " is not declared!\n";
-                break;
-            case ErrorType::WrongValueTypeForVariable:
-                llvm::errs() << "Illegal value for type " << V << "!\n";
-                break;
-            default:
-                llvm::errs() << "Unknown error\n";
-                break;
+    class DeclCheck : public ASTVisitor {
+        llvm::StringMap<VarType> VarTypes;
+        bool HasError = false;
+
+        enum ErrorKind { AlreadyDefined, NotDefined, DivideByZero, TypeMismatch, InvalidOperation };
+        void report(ErrorKind kind, const std::string &msg) {
+            switch (kind) {
+            case AlreadyDefined:   llvm::errs() << "Error: variable '" << msg << "' already defined\n"; break;
+            case NotDefined:       llvm::errs() << "Error: variable '" << msg << "' not defined\n"; break;
+            case DivideByZero:     llvm::errs() << "Error: division by zero!\n"; break;
+            case TypeMismatch:     llvm::errs() << "Error: type mismatch for '" << msg << "'\n"; break;
+            case InvalidOperation: llvm::errs() << "Error: invalid operation '" << msg << "' for type\n"; break;
             }
             HasError = true;
-            exit(3);
+        }
+
+
+        VarType typeOf(ASTNode *node) {
+            if (!node) return VarType::ERROR;
+            // Literals
+            if (auto *i = dynamic_cast<LiteralNode<int>*>(node))    return VarType::INT;
+            if (auto *f = dynamic_cast<LiteralNode<float>*>(node))  return VarType::FLOAT;
+            if (auto *b = dynamic_cast<LiteralNode<bool>*>(node))   return VarType::BOOL;
+            if (auto *c = dynamic_cast<LiteralNode<char>*>(node))   return VarType::CHAR;
+            if (auto *s = dynamic_cast<LiteralNode<std::string>*>(node)) return VarType::STRING;
+            // Variable reference
+            if (auto *v = dynamic_cast<VarRefNode*>(node)) {
+                if (!VarTypes.count(v->name)) {
+                    report(NotDefined, v->name);
+                    return VarType::ERROR;
+                }
+                return VarTypes.lookup(v->name);
+            }
+            // Binary operations
+            if (auto *bin = dynamic_cast<BinaryOpNode*>(node)) {
+                VarType lt = typeOf(bin->left.get());
+                VarType rt = typeOf(bin->right.get());
+                switch (bin->op) {
+                case BinaryOp::ADD: case BinaryOp::SUBTRACT:
+                case BinaryOp::MULTIPLY: case BinaryOp::DIVIDE: case BinaryOp::MOD:
+                case BinaryOp::POW: {
+                    // numeric or array-scalar or scalar-array
+                    if ((lt==VarType::INT||lt==VarType::FLOAT) && (rt==VarType::INT||rt==VarType::FLOAT))
+                        return (lt==VarType::FLOAT||rt==VarType::FLOAT?VarType::FLOAT:VarType::INT);
+                    if (lt==VarType::ARRAY && (rt==VarType::INT||rt==VarType::FLOAT)) return VarType::ARRAY;
+                    if ((lt==VarType::INT||lt==VarType::FLOAT) && rt==VarType::ARRAY) return VarType::ARRAY;
+                    report(InvalidOperation, varTypeName(lt) + std::string(" op ") + varTypeName(rt));
+                    return VarType::ERROR;
+                }
+                case BinaryOp::AND: case BinaryOp::OR:
+                    if (lt==VarType::BOOL && rt==VarType::BOOL) return VarType::BOOL;
+                    report(InvalidOperation, "logical"); return VarType::ERROR;
+                case BinaryOp::EQUAL: case BinaryOp::NOT_EQUAL:
+                case BinaryOp::LESS: case BinaryOp::LESS_EQUAL:
+                case BinaryOp::GREATER: case BinaryOp::GREATER_EQUAL:
+                    // comparisons produce bool
+                    if ((lt==VarType::INT||lt==VarType::FLOAT) && (rt==VarType::INT||rt==VarType::FLOAT)) return VarType::BOOL;
+                    if (lt==rt) return VarType::BOOL;
+                    report(TypeMismatch, "compare"); return VarType::ERROR;
+                case BinaryOp::CONCAT:
+                    if (lt==VarType::STRING && rt==VarType::STRING) return VarType::STRING;
+                    report(InvalidOperation, "concat"); return VarType::ERROR;
+                case BinaryOp::INDEX:
+                    if (lt==VarType::ARRAY && rt==VarType::INT) return VarType::ARRAY; // element type infer omitted
+                    report(InvalidOperation, "index"); return VarType::ERROR;
+                default:
+                    return VarType::ERROR;
+                }
+            }
+            // Unary operations
+            if (auto *un = dynamic_cast<UnaryOpNode*>(node)) {
+                VarType ot = typeOf(un->operand.get());
+                switch (un->op) {
+                case UnaryOp::INCREMENT: case UnaryOp::DECREMENT:
+                    if (ot==VarType::INT||ot==VarType::FLOAT) return ot;
+                    break;
+                case UnaryOp::ABS:
+                    if (ot==VarType::INT||ot==VarType::FLOAT) return ot;
+                    break;
+                case UnaryOp::LENGTH:
+                    if (ot==VarType::ARRAY||ot==VarType::STRING) return VarType::INT;
+                    break;
+                case UnaryOp::MIN: case UnaryOp::MAX:
+                    if (ot==VarType::ARRAY) return VarType::ARRAY;
+                    break;
+                default: break;
+                }
+                report(InvalidOperation, varTypeName(ot));
+                return VarType::ERROR;
+            }
+            // Arrays
+            if (auto *arr = dynamic_cast<ArrayNode*>(node)) {
+                if (arr->elements.empty()) return VarType::ARRAY;
+                VarType et = typeOf(arr->elements[0].get());
+                for (auto &e : arr->elements) {
+                    VarType t2 = typeOf(e.get());
+                    if (t2 != et) report(TypeMismatch, "array elements");
+                }
+                return VarType::ARRAY;
+            }
+            // Array access
+            if (auto *acc = dynamic_cast<ArrayAccessNode*>(node)) {
+                VarType at = typeOf(acc->index.get());
+                VarType arrt = VarTypes.lookup(acc->arrayName);
+                if (arrt != VarType::ARRAY) report(TypeMismatch, acc->arrayName);
+                if (at != VarType::INT) report(TypeMismatch, "index type");
+                return VarType::ARRAY;
+            }
+            // Print
+            if (auto *p = dynamic_cast<PrintNode*>(node)) {
+                return typeOf(p->expr.get());
+            }
+            // Default: error
+            return VarType::ERROR;
         }
 
     public:
-        DeclCheck() : HasError(false) {}
+        bool hasError() const { return HasError; }
 
-        bool hasError() { return HasError; }
+        // Program and Block
+        void visit(ProgramNode &node) override {
+            for (auto &s : node.statements) s->accept(*this);
+        }
+        void visit(BlockNode &node) override {
+            for (auto &s : node.statements) s->accept(*this);
+        }
 
-        virtual void visit(Base &Node) override
-        {
-            for (auto I = Node.begin(), E = Node.end(); I != E; ++I)
-            {
-                (*I)->accept(*this);
-            }
-        };
-
-        virtual void visit(PrintStatement &Node) override
-        {
-            Expression *declaration = (Expression *)Node.getExpr();
-            declaration->accept(*this);
-        };
-
-        virtual void visit(BinaryOp &Node) override
-        {
-            if (Node.getLeft())
-            {
-                Node.getLeft()->accept(*this);
-            }
-            else
-            {
-                HasError = true;
-            }
-            if (Node.getRight())
-            {
-                Node.getRight()->accept(*this);
-            }
-            else
-            {
-                HasError = true;
-            }
-
-            // Divide by zero check
-            if (Node.getOperator() == BinaryOp::Operator::Div)
-            {
-                Expression *right = (Expression *)Node.getRight();
-                if (right->isNumber() && right->getNumber() == 0)
-                {
-                    error(DivideByZero, ((Expression *)Node.getLeft())->getValue());
+        // Variable declarations
+        void visit(MultiVarDeclNode &node) override {
+            for (auto &decl : node.declarations) {
+                const std::string &name = decl->name;
+                if (VarTypes.count(name)) report(AlreadyDefined, name);
+                else {
+                    VarTypes[name] = decl->type;
+                    if (decl->value) decl->value->accept(*this);
                 }
             }
-        };
+        }
 
-        virtual void visit(Statement &Node) override
-        {
-            if (Node.getKind() == Statement::StatementType::Declaration)
-            {
-                DecStatement *declaration = (DecStatement *)&Node;
-                declaration->accept(*this);
+        // Assignments
+        void visit(AssignNode &node) override {
+            if (!VarTypes.count(node.target)) report(NotDefined, node.target);
+            node.value->accept(*this);
+            VarType vt = VarTypes.lookup(node.target);
+            VarType rt = typeOf(node.value.get());
+            // Allowed ops per type
+            bool ok = false;
+            switch (vt) {
+            case VarType::INT: case VarType::FLOAT:
+                ok = true; break;
+            case VarType::CHAR: case VarType::STRING: case VarType::BOOL: case VarType::ARRAY:
+                ok = (node.op == BinaryOp::EQUAL);
+                break;
+            default: break;
             }
-            else if (Node.getKind() == Statement::StatementType::Assignment)
-            {
-                AssignStatement *declaration = (AssignStatement *)&Node;
-                declaration->accept(*this);
-            }
-            else if (Node.getKind() == Statement::StatementType::If)
-            {
-                IfStatement *declaration = (IfStatement *)&Node;
-                declaration->accept(*this);
-            }
-            else if (Node.getKind() == Statement::StatementType::ElseIf)
-            {
-                ElseIfStatement *declaration = (ElseIfStatement *)&Node;
-                declaration->accept(*this);
-            }
-            else if (Node.getKind() == Statement::StatementType::Else)
-            {
-                ElseStatement *declaration = (ElseStatement *)&Node;
-                declaration->accept(*this);
-            }
-            else if (Node.getKind() == Statement::StatementType::Print)
-            {
-                PrintStatement *declaration = (PrintStatement *)&Node;
-                declaration->accept(*this);
-            }
-            else if (Node.getKind() == Statement::StatementType::While)
-            {
-                WhileStatement *declaration = (WhileStatement *)&Node;
-                declaration->accept(*this);
-            }
-            else if (Node.getKind() == Statement::StatementType::For)
-            {
-                ForStatement *declaration = (ForStatement *)&Node;
-                declaration->accept(*this);
-            }
-            
-            
-        };
+            if (!ok) report(InvalidOperation, varTypeName(vt));
+            if (rt != vt && !(vt==VarType::FLOAT && rt==VarType::INT))
+                report(TypeMismatch, node.target);
+        }
 
-        virtual void visit(BooleanOp &Node) override
-        {
-            if (Node.getLeft())
-            {
-                Node.getLeft()->accept(*this);
-            }
-            else
-            {
-                HasError = true;
-            }
-            if (Node.getRight())
-            {
-                Node.getRight()->accept(*this);
-            }
-            else
-            {
-                HasError = true;
-            }
-        };
+        // Variable reference
+        void visit(VarRefNode &node) override {
+            if (!VarTypes.count(node.name)) report(NotDefined, node.name);
+        }
 
-        virtual void visit(Expression &Node) override
-        {
-            if (Node.getKind() == Expression::ExpressionType::Identifier)
-            {
-                if (variableTypeMap.count(Node.getValue()) == 0)
-                {
-                    error(NotDefinedVariable, Node.getValue());
+        // Binary ops
+        void visit(BinaryOpNode &node) override {
+            node.left->accept(*this);
+            node.right->accept(*this);
+            if (node.op == BinaryOp::DIVIDE) {
+                if (auto *lit = dynamic_cast<LiteralNode<int>*>(node.right.get())) {
+                    if (lit->value == 0) report(DivideByZero, "");
                 }
             }
-            else if (Node.getKind() == Expression::ExpressionType::BinaryOpType)
-            {
-                BinaryOp *declaration = (BinaryOp *)&Node;
-                declaration->accept(*this);
-            }
-            else if (Node.getKind() == Expression::ExpressionType::BooleanOpType)
-            {
-                Node.getBooleanOp()->getLeft()->accept(*this);
-                Node.getBooleanOp()->getRight()->accept(*this);
-            }
-        };
+            typeOf(&node);
+        }
 
-        virtual void visit(DecStatement &Node) override
-        {
-            if (variableTypeMap.count(Node.getLValue()->getValue()) > 0)
-            {
-                error(AlreadyDefinedVariable, Node.getLValue()->getValue());
-            }
-            // Add this new variable to variableTypeMap
-            if (Node.getDecType() == DecStatement::DecStatementType::Boolean)
-            {
-                variableTypeMap[Node.getLValue()->getValue()] = 'b';
-            }
-            else
-            {
-                variableTypeMap[Node.getLValue()->getValue()] = 'i';
-            }
+        // Unary ops
+        void visit(UnaryOpNode &node) override {
+            node.operand->accept(*this);
+            typeOf(&node);
+        }
 
-            Expression *rightValue = (Expression *)Node.getRValue();
-            if (rightValue == nullptr)
-            {
-                return;
+        // Control structures
+        void visit(IfElseNode &node) override {
+            node.condition->accept(*this);
+            if (typeOf(node.condition.get()) != VarType::BOOL)
+                report(TypeMismatch, "if condition");
+            node.thenBlock->accept(*this);
+            if (node.elseBlock) node.elseBlock->accept(*this);
+        }
+        void visit(ForLoopNode &node) override {
+            if (node.init)  node.init->accept(*this);
+            if (node.condition) {
+                node.condition->accept(*this);
+                if (typeOf(node.condition.get()) != VarType::BOOL)
+                    report(TypeMismatch, "for condition");
             }
-            if (Node.getDecType() == DecStatement::DecStatementType::Boolean)
-            {
-                if (!(rightValue->getKind() == Expression::ExpressionType::Boolean ||
-                      rightValue->getKind() == Expression::ExpressionType::BooleanOpType))
-                {
-                    error(WrongValueTypeForVariable, "bool");
-                }
-            }
-            else if (Node.getDecType() == DecStatement::DecStatementType::Number)
-            {
-                if (!(rightValue->getKind() == Expression::ExpressionType::Number ||
-                      rightValue->getKind() == Expression::ExpressionType::BinaryOpType))
-                {
-                    error(WrongValueTypeForVariable, "int");
-                }
-            }
+            if (node.update) node.update->accept(*this);
+            node.body->accept(*this);
+        }
+        void visit(WhileLoopNode &node) override {
+            node.condition->accept(*this);
+            if (typeOf(node.condition.get()) != VarType::BOOL)
+                report(TypeMismatch, "while condition");
+            node.body->accept(*this);
+        }
 
-            rightValue->accept(*this);
-        };
+        // Print
+        void visit(PrintNode &node) override {
+            node.expr->accept(*this);
+        }
 
-        virtual void visit(IfStatement &Node) override
-        {
-            Expression *declaration = (Expression *)Node.getCondition();
-            declaration->accept(*this);
-            llvm::SmallVector<Statement *> stmts = Node.getStatements();
-            for (auto I = stmts.begin(), E = stmts.end(); I != E; ++I)
-            {
-                (*I)->accept(*this);
-            }
-        };
+        // Array
+        void visit(ArrayNode &node) override {
+            for (auto &e : node.elements) e->accept(*this);
+            typeOf(&node);
+        }
+        void visit(ArrayAccessNode &node) override {
+            node.index->accept(*this);
+            typeOf(&node);
+        }
 
-        virtual void visit(ElseIfStatement &Node) override
-        {
-            Expression *declaration = (Expression *)Node.getCondition();
-            declaration->accept(*this);
-            llvm::SmallVector<Statement *> stmts = Node.getStatements();
-            for (auto I = stmts.begin(), E = stmts.end(); I != E; ++I)
-            {
-                (*I)->accept(*this);
-            }
-        };
-
-        virtual void visit(ElseStatement &Node) override
-        {
-            llvm::SmallVector<Statement *> stmts = Node.getStatements();
-            for (auto I = stmts.begin(), E = stmts.end(); I != E; ++I)
-            {
-                (*I)->accept(*this);
-            }
-        };
-
-        virtual void visit(AssignStatement &Node) override
-        {
-            Node.getLValue()->accept(*this);
-            Node.getRValue()->accept(*this);
-            if (variableTypeMap.lookup(Node.getLValue()->getValue()) == 'i' &&
-                (Node.getRValue()->getKind() == Expression::ExpressionType::Boolean ||
-                 Node.getRValue()->getKind() == Expression::ExpressionType::BooleanOpType))
-            {
-                error(WrongValueTypeForVariable, "int");
-            }
-            if (variableTypeMap.lookup(Node.getLValue()->getValue()) == 'b' &&
-                (Node.getRValue()->getKind() == Expression::ExpressionType::Number ||
-                 Node.getRValue()->getKind() == Expression::ExpressionType::BinaryOpType))
-            {
-                error(WrongValueTypeForVariable, "bool");
-            }
-        };
-
-        virtual void visit(WhileStatement &Node) override{
-            Node.getCondition()->accept(*this);
-            llvm::SmallVector<Statement* > stmts = Node.getStatements();
-            for (auto I = stmts.begin(), E = stmts.end(); I != E; ++I)
-            {
-                (*I)->accept(*this);
-            }
-        };
-        
-        virtual void visit(ForStatement &Node) override{
-            AssignStatement * initial_assign = Node.getInitialAssign();
-            /*if(initial_assign == nullptr){
-                exit(0);
-            }*/
-            (initial_assign->getLValue())->accept(*this);
-            (initial_assign->getRValue())->accept(*this);
-            Node.getCondition()->accept(*this);
-            
-            AssignStatement * update_assign = Node.getUpdateAssign();
-            if(update_assign == nullptr){
-                exit(0);
-            }
-            (update_assign->getLValue())->accept(*this);
-            (update_assign->getRValue())->accept(*this);
-
-            llvm::SmallVector<Statement* > stmts = Node.getStatements();
-            for (auto I = stmts.begin(), E = stmts.end(); I != E; ++I)
-            {
-                (*I)->accept(*this);
-            }
-        };
-
+        // Concat, Pow
+        void visit(ConcatNode &node) override {
+            node.left->accept(*this);
+            node.right->accept(*this);
+            typeOf(&node);
+        }
+        void visit(PowNode &node) override {
+            node.base->accept(*this);
+            node.exponent->accept(*this);
+            typeOf(&node);
+        }
     };
 }
 
-bool Semantic::semantic(AST *Tree)
-{
-    if (!Tree)
-        return false;
-    DeclCheck Check;
-    Tree->accept(Check);
-    return Check.hasError();
+bool Semantic::semantic(ProgramNode *root) {
+    if (!root) return false;
+    DeclCheck checker;
+    root->accept(checker);
+    return checker.hasError();
 }

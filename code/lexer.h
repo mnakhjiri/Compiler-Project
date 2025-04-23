@@ -1,102 +1,112 @@
 #ifndef LEXER_H
 #define LEXER_H
-#include "llvm/ADT/StringRef.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include <string>
 
+#include "llvm/ADT/StringRef.h"
+#include <string>
 
 class Lexer;
 
-class Token
-{
-    friend class Lexer;
-
+class Token {
 public:
-    enum TokenKind : unsigned short
-    {
-        semi_colon,    // ;
-        unknown,       // unknown token
-        identifier,    // identifier like a, b, c, d, etc.
-        number,        // number like 1, 2, 3, 4, etc.
-        comma,         // ,
-        plus,          // +
-        minus,         // -
-        star,          // *
-        mod,           // %
-        slash,         // /
-        power,         // ^
-        l_paren,       // (
-        r_paren,       // )
-        l_brace,       // {
-        r_brace,       // }
-        plus_equal,    // +=
-        plus_plus,     // ++
-        minus_minus,   // --
-        minus_equal,   // -=
-        star_equal,    // *=
-        mod_equal,     // %=
-        slash_equal,   // /=
-        equal,         // =
-        equal_equal,   // ==
-        not_equal,     // !=
-        KW_not,           // !
-        less,          // <
-        less_equal,    // <=
-        greater,       // >
-        greater_equal, // >=
-        comment,       // /*
-        uncomment,     // */
-        KW_int,        // int
-        KW_bool,       // bool
-        KW_if,         // if
-        KW_else,       // else
-        KW_while,      // while
-        KW_for,        // for
-        KW_and,        // and
-        KW_or,         // or
-        KW_true,       // true
-        KW_false,      // false
-        KW_print,      // print
-        eof            // end of file
+    enum TokenKind {
+
+        semi_colon,
+        identifier,
+        number,
+        comma,
+        l_paren,
+        r_paren,
+        l_brace,
+        r_brace,
+        l_bracket,
+        r_bracket,
+        eof,
+
+        plus,
+        minus,
+        star,
+        slash,
+        mod,
+        caret,
+        equal,
+        plus_equal,
+        minus_equal,
+        star_equal,
+        slash_equal,
+        mod_equal,
+        equal_equal,
+        not_equal,
+        less,
+        less_equal,
+        greater,
+        greater_equal,
+        and_op,
+        or_op,
+        not_op
+        plus_plus,
+        minus_minus,
+
+
+        KW_int,
+        KW_bool,
+        KW_float,
+        KW_char,
+        KW_string,
+        KW_array,
+        KW_if,
+        KW_else,
+        KW_while,
+        KW_for,
+        KW_foreach,
+        KW_in,
+        KW_print,
+        KW_true,
+        KW_false,
+        KW_try,
+        KW_catch,
+        KW_error,
+        KW_match,
+        KW_concat,
+        KW_pow,
+        KW_abs,
+        KW_length,
+        KW_min,
+        KW_max,
+        KW_index,
+
+        comment_start,
+        comment_end,
+        string_literal,
+        char_literal,
+        float_literal,
+        underscore,
+        arrow
     };
 
-private:
-    TokenKind Kind;       // <type of token>
-    llvm::StringRef Text; // <token context>
+    TokenKind kind;
+    llvm::StringRef text;
+    int line;
+    int column;
 
-public:
-    TokenKind getKind() const { return Kind; }
-    bool is(TokenKind K) const { return Kind == K; }
-    llvm::StringRef getText() const { return Text; }
-
-    // kind="+" isOneOf(plus, minus) -> true
-    bool isOneOf(TokenKind K1, TokenKind K2) const
-    {
-        return is(K1) || is(K2);
-    }
-
-    template <typename... Ts> // variadic template can take several inputs
-    bool isOneOf(TokenKind K1, TokenKind K2, Ts... Ks) const
-    {
-        return is(K1) || isOneOf(K2, Ks...);
+    bool is(TokenKind k) const { return kind == k; }
+    bool isOneOf(TokenKind k1, TokenKind k2) const { return is(k1) || is(k2); }
+    template <typename... Ts> bool isOneOf(TokenKind k1, TokenKind k2, Ts... ks) const {
+        return is(k1) || isOneOf(k2, ks...);
     }
 };
 
-class Lexer
-{
-    const char *BufferStart;
-    const char *BufferPtr;
+class Lexer {
+    const char *bufferStart;
+    const char *bufferPtr;
 
 public:
-    Lexer(const llvm::StringRef &Buffer)
-    {
-        BufferStart = Buffer.begin();
-        BufferPtr = BufferStart;
-    }
-    void next(Token &token);
+    Lexer(llvm::StringRef buffer);
+    Token nextToken();
 
 private:
-    void formToken(Token &Result, const char *TokEnd, Token::TokenKind Kind);
+    void skipWhitespace();
+    void skipComment();
+    Token formToken(Token::TokenKind kind, const char *tokEnd);
 };
 
 #endif
